@@ -53,6 +53,7 @@ def main():
             rate = step * tokens_per_step / (time.perf_counter() - start)
             calls = model.all_reduce_calls - calls
             print(f"step {step:>4}  loss {loss:.3f}  {rate:,.0f} tokens/s  {calls} all-reduces")
+    dist.barrier()
     dist.destroy_process_group()
 
 
