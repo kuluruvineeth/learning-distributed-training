@@ -31,3 +31,9 @@ jobs:
       - name: Run a short single-device training
         timeout-minutes: 3
         run: uv run python single-device/train.py --steps 25
+      - name: Run four-rank data-parallel training
+        timeout-minutes: 3
+        env:
+          OMP_NUM_THREADS: "1"
+          GLOO_SOCKET_IFNAME: lo
+        run: uv run torchrun --nproc-per-node=4 --master-port=29500 data-parallel/train.py --steps 25
