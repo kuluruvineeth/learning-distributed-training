@@ -9,11 +9,11 @@ def windows(tokens: torch.Tensor, seq_length: int) -> torch.Tensor:
 
 
 def micro_batches(
-    tokens: torch.Tensor, seq_length: int, micro_batch_size: int
+    tokens: torch.Tensor, seq_length: int, micro_batch_size: int, rank: int = 0, world: int = 1
 ) -> Iterator[tuple[torch.Tensor, torch.Tensor]]:
     rows = windows(tokens, seq_length)
-    usable = rows.size(0) - rows.size(0) % micro_batch_size
+    rows = rows[: rows.size(0) - rows.size(0) % (micro_batch_size * world)][rank::world]
     while True:
-        for start in range(0, usable, micro_batch_size):
+        for start in range(0, rows.size(0), micro_batch_size):
             batch = rows[start : start + micro_batch_size]
             yield batch[:, :-1], batch[:, 1:]
