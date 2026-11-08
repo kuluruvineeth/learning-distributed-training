@@ -13,7 +13,9 @@ def train_step(
     model: nn.Module, batches: Iterator[tuple[torch.Tensor, torch.Tensor]], grad_acc: int
 ) -> float:
     total = 0.0
-    for _ in range(grad_acc):
+    for i in range(grad_acc):
+        if hasattr(model, "require_backward_grad_sync"):
+            model.require_backward_grad_sync = i == grad_acc - 1
         inputs, targets = next(batches)
         loss = loss_fn(model(inputs), targets) / grad_acc
         loss.backward()
