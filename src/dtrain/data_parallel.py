@@ -1,5 +1,6 @@
 import contextlib
 
+import torch
 import torch.distributed as dist
 import torch.nn as nn
 
@@ -39,3 +40,31 @@ class DataParallelNaive(nn.Module):
             yield
         finally:
             self.require_backward_grad_sync = True
+
+
+class Bucket:
+    def __init__(self, params: list[nn.Parameter], grads: torch.Tensor, group, world: int):
+        self.params = set(params)
+        self.ready = set()
+        self.grads = grads
+        self.group = group
+        self.world = world
+        self.handle = None
+
+    def mark_ready(self, p: nn.Parameter) -> bool:
+        self.ready.add(p)
+        if len(self.ready) < len(self.params):
+            return False
+        self.grads /= self.world
+        self.handle = dist.all_reduce(self.grads, group=self.group, async_op=True)
+        return True
+
+    def wait(self) -> None:
+        self.handle.wait()
+        self.handle = None
+        self.ready.clear()
+
+    def reset(self) -> None:
+        self.handle = None
+        self.ready.clear()
+        self.grads.zero_()
