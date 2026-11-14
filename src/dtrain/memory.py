@@ -25,6 +25,19 @@ def training_bytes(
     return out
 
 
+ZERO_SHARDS = {
+    1: {"master weights", "optimizer"},
+    2: {"master weights", "optimizer", "gradients", "fp32 gradients"},
+    3: {"master weights", "optimizer", "gradients", "fp32 gradients", "weights"},
+}
+
+
+def zero_bytes(params: int, stage: int, world: int) -> dict[str, float]:
+    sharded = ZERO_SHARDS.get(stage, set())
+    full = training_bytes(params, fp32_grad_accumulation=True)
+    return {name: size / world if name in sharded else size for name, size in full.items()}
+
+
 def activation_bytes(config: LlamaConfig, seq_length: int, micro_batch_size: int) -> int:
     h, a = config.hidden_size, config.num_attention_heads
     per_layer = seq_length * micro_batch_size * h * (34 + 5 * a * seq_length / h)
