@@ -60,6 +60,7 @@ def main():
         print(f"  {'total':<10} {sum(state.values()) / 1e3:8,.1f} KB")
         calls = ", ".join(f"{n} {c // args.steps}" for n, c in model.calls.items() if c)
         print(f"  collectives per step: {calls}")
+    dist.barrier()
     dist.destroy_process_group()
 
 
