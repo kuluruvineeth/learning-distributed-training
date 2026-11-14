@@ -155,3 +155,31 @@ class Zero(nn.Module):
         for u in self.units:
             if u.grad is not None:
                 u.grad.zero_()
+
+    def state_bytes(self) -> dict[str, int]:
+        def size(tensors):
+            return sum(t.numel() * t.element_size() for t in tensors)
+
+        weights = [u.shard if self.stage == 3 else u.flat for u in self.units]
+        grads = [u.grad if self.stage < 2 else u.shard.grad for u in self.units]
+        states = [
+            t
+            for state in self.optimizer.state.values()
+            for t in state.values()
+            if torch.is_tensor(t) and t.dim() > 0
+        ]
+        return {"weights": size(weights), "gradients": size(grads), "optimizer": size(states)}
+
+    @torch.no_grad()
+    def full_parameters(self) -> list[torch.Tensor]:
+        out = []
+        for u in self.units:
+            flat = u.flat
+            if self.stage == 3:
+                flat = torch.empty(u.size * self.world)
+                dist.all_gather_single(flat, u.shard.detach(), group=self.group)
+            offset = 0
+            for shape in u.shapes:
+                out.append(flat[offset : offset + shape.numel()].view(shape).clone())
+                offset += shape.numel()
+        return out
