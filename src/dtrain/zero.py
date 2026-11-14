@@ -107,6 +107,16 @@ class Zero(nn.Module):
         dist.all_gather_single(flat, shard, group=self.group)
         self._count("all_gather", flat)
 
+    def _gather(self, u: Unit) -> None:
+        flat = torch.empty(u.size * self.world)
+        self._all_gather(flat, u.shard.detach())
+        u.bind(flat)
+
+    def _after_forward(self, u: Unit, out: torch.Tensor) -> None:
+        u.free()
+        if out.requires_grad:
+            out.register_hook(lambda grad: self._gather(u))
+
     def _on_grad(self, p: nn.Parameter) -> None:
         u = self.unit_of[p]
         if self.stage < 2:
