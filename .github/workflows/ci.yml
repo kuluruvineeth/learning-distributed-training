@@ -37,3 +37,9 @@ jobs:
           OMP_NUM_THREADS: "1"
           GLOO_SOCKET_IFNAME: lo
         run: uv run torchrun --nproc-per-node=4 --master-port=29500 data-parallel/train.py --steps 25
+      - name: Run four-rank ZeRO-3 training
+        timeout-minutes: 3
+        env:
+          OMP_NUM_THREADS: "1"
+          GLOO_SOCKET_IFNAME: lo
+        run: uv run torchrun --nproc-per-node=4 --master-port=29500 zero/train.py --stage 3 --steps 25
