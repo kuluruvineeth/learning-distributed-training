@@ -106,3 +106,24 @@ class Zero(nn.Module):
     def _all_gather(self, flat: torch.Tensor, shard: torch.Tensor) -> None:
         dist.all_gather_single(flat, shard, group=self.group)
         self._count("all_gather", flat)
+
+    @torch.no_grad()
+    def step(self) -> None:
+        for u in self.units:
+            if self.stage == 0:
+                dist.all_reduce(u.grad, group=self.group)
+                self._count("all_reduce", u.grad)
+                u.shard.grad = u.grad.div_(self.world)
+            elif self.stage == 1:
+                u.grad[u.own] = self._reduce_scatter(u.grad)
+                u.shard.grad = u.grad[u.own]
+        self.optimizer.step()
+        if self.stage in (1, 2):
+            for u in self.units:
+                self._all_gather(u.flat, u.shard.detach().clone())
+
+    def zero_grad(self) -> None:
+        self.optimizer.zero_grad()
+        for u in self.units:
+            if u.grad is not None:
+                u.grad.zero_()
