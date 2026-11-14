@@ -1,4 +1,7 @@
+from collections.abc import Callable
+
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 
 
@@ -44,3 +47,47 @@ class Unit:
     def free(self) -> None:
         for p in self.params:
             p.data = torch.empty(0)
+
+
+class Zero(nn.Module):
+    def __init__(
+        self,
+        module: nn.Module,
+        stage: int,
+        make_optimizer: Callable[[list[nn.Parameter]], torch.optim.Optimizer],
+        group: dist.ProcessGroup | None = None,
+    ):
+        super().__init__()
+        if stage not in (0, 1, 2, 3):
+            raise ValueError("stage must be 0, 1, 2 or 3")
+        self.module = module
+        self.stage = stage
+        self.group = group
+        self.rank, self.world = dist.get_rank(group), dist.get_world_size(group)
+        self.sent = {"all_reduce": 0, "reduce_scatter": 0, "all_gather": 0}
+        self.calls = dict.fromkeys(self.sent, 0)
+        self.units = [Unit(m, self.rank, self.world) for m in units(module)]
+        self.unit_of = {p: u for u in self.units for p in u.params}
+        src = dist.get_global_rank(group, 0) if group is not None else 0
+        for u in self.units:
+            flat = u.flatten([p.detach() for p in u.params])
+            dist.broadcast(flat, src=src, group=group)
+            if stage == 3:
+                u.shard = nn.Parameter(flat[u.own].clone())
+                u.free()
+                u.module.register_forward_pre_hook(lambda m, args, u=u: self._gather(u))
+                u.module.register_forward_hook(
+                    lambda m, args, out, u=u: self._after_forward(u, out)
+                )
+            else:
+                u.flat = flat
+                u.bind(flat)
+                u.shard = nn.Parameter(flat if stage == 0 else flat[u.own])
+            if stage < 2:
+                u.grad = torch.zeros_like(flat)
+        for p in self.unit_of:
+            p.register_post_accumulate_grad_hook(self._on_grad)
+        self.optimizer = make_optimizer([u.shard for u in self.units])
+
+    def forward(self, *args, **kwargs):
+        return self.module(*args, **kwargs)
