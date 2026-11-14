@@ -91,3 +91,18 @@ class Zero(nn.Module):
 
     def forward(self, *args, **kwargs):
         return self.module(*args, **kwargs)
+
+    def _count(self, op: str, full: torch.Tensor) -> None:
+        parts = 2 * (self.world - 1) if op == "all_reduce" else self.world - 1
+        self.sent[op] += full.numel() * full.element_size() * parts // self.world
+        self.calls[op] += 1
+
+    def _reduce_scatter(self, flat: torch.Tensor) -> torch.Tensor:
+        out = torch.empty(flat.numel() // self.world)
+        dist.reduce_scatter_single(out, flat, group=self.group)
+        self._count("reduce_scatter", flat)
+        return out / self.world
+
+    def _all_gather(self, flat: torch.Tensor, shard: torch.Tensor) -> None:
+        dist.all_gather_single(flat, shard, group=self.group)
+        self._count("all_gather", flat)
