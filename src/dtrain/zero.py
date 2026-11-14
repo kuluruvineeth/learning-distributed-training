@@ -107,6 +107,24 @@ class Zero(nn.Module):
         dist.all_gather_single(flat, shard, group=self.group)
         self._count("all_gather", flat)
 
+    def _on_grad(self, p: nn.Parameter) -> None:
+        u = self.unit_of[p]
+        if self.stage < 2:
+            offset = u.offset[p]
+            u.grad[offset : offset + p.numel()] += p.grad.reshape(-1)
+            p.grad = None
+            return
+        u.ready.add(p)
+        if len(u.ready) < len(u.params):
+            return
+        mine = self._reduce_scatter(u.flatten([q.grad for q in u.params]))
+        u.shard.grad = mine if u.shard.grad is None else u.shard.grad + mine
+        for q in u.params:
+            q.grad = None
+        u.ready.clear()
+        if self.stage == 3:
+            u.free()
+
     @torch.no_grad()
     def step(self) -> None:
         for u in self.units:
