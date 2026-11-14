@@ -20,6 +20,7 @@ def _worker(rank: int, world: int, port: int, fn: Callable, args: tuple) -> None
     dist.init_process_group("gloo", rank=rank, world_size=world, timeout=timedelta(seconds=30))
     try:
         fn(rank, world, *args)
+        dist.barrier()
     finally:
         dist.destroy_process_group()
 
