@@ -21,8 +21,13 @@ def _worker(rank: int, world: int, port: int, fn: Callable, args: tuple) -> None
     try:
         fn(rank, world, *args)
         dist.barrier()
-    finally:
+    except BaseException:
         dist.destroy_process_group()
+        raise
+    # Gloo's teardown can abort on Linux after the work is done; every rank is past the barrier.
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(0)
 
 
 def run_distributed(world: int, fn: Callable, *args) -> None:
