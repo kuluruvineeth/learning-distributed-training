@@ -12,4 +12,3 @@ build/
 *.mov
 
 .cache/
-checkpointing/.runs/
