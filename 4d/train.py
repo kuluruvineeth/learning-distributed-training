@@ -75,6 +75,7 @@ def main():
         }
         per_step = ", ".join(f"{k} {v / args.steps / 1e3:,.0f} KB" for k, v in sent.items())
         print(f"sent per step by this GPU: {per_step}")
+    dist.barrier()
     dist.destroy_process_group()
 
 
