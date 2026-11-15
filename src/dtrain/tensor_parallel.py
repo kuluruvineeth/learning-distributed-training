@@ -1,5 +1,7 @@
 import torch
 import torch.distributed as dist
+import torch.nn as nn
+import torch.nn.functional as F
 
 
 class TensorParallel:
@@ -22,3 +24,36 @@ class TensorParallel:
         self.sent["all_gather"] += out.numel() * out.element_size() * (self.world - 1) // self.world
         self.calls["all_gather"] += 1
         return out
+
+
+class Gather(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x, tp):
+        ctx.tp = tp
+        return tp.all_gather(x, dim=-1)
+
+    @staticmethod
+    def backward(ctx, grad):
+        tp = ctx.tp
+        return grad.chunk(tp.world, dim=-1)[tp.rank].contiguous(), None
+
+
+def shard(weight: torch.Tensor, dim: int, tp: TensorParallel) -> nn.Parameter:
+    if weight.size(dim) % tp.world:
+        raise ValueError(f"size {weight.size(dim)} does not split across {tp.world} ranks")
+    piece = weight.detach().chunk(tp.world, dim=dim)[tp.rank].clone()
+    param = nn.Parameter(piece)
+    param.shard_dim = dim
+    return param
+
+
+class ColumnParallelLinear(nn.Module):
+    def __init__(self, linear: nn.Linear, tp: TensorParallel, gather_output: bool = False):
+        super().__init__()
+        self.weight = shard(linear.weight, 0, tp)
+        self.tp = tp
+        self.gather_output = gather_output
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        y = F.linear(x, self.weight)
+        return Gather.apply(y, self.tp) if self.gather_output else y
