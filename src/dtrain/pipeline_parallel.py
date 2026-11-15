@@ -2,6 +2,8 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 
+from dtrain.train import loss_fn
+
 
 class PipelineParallel:
     def __init__(self, group: dist.ProcessGroup | None = None):
@@ -73,3 +75,26 @@ class PipelineStage(nn.Module):
         if self.final_proj is not None:
             out += ["final_norm.weight", "final_proj.weight"]
         return out
+
+
+def _forward(stage, batches, grad_acc, shape):
+    pp = stage.pp
+    inputs, targets = next(batches)
+    x = inputs if pp.first else pp.recv(shape, pp.prev).requires_grad_()
+    out = stage(x)
+    loss = None
+    if pp.last:
+        loss = loss_fn(out, targets) / grad_acc
+    else:
+        pp.send(out.detach(), pp.next)
+    return x, out, loss
+
+
+def _backward(stage, x, out, loss, shape):
+    pp = stage.pp
+    if pp.last:
+        loss.backward()
+    else:
+        torch.autograd.backward(out, pp.recv(shape, pp.next))
+    if not pp.first:
+        pp.send(x.grad, pp.prev)
