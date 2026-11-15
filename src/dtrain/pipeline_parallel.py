@@ -1,5 +1,6 @@
 import torch
 import torch.distributed as dist
+import torch.nn as nn
 
 
 class PipelineParallel:
@@ -33,3 +34,42 @@ class PipelineParallel:
         x = torch.empty(shape)
         dist.recv(x, src, group=self.group)
         return x
+
+
+def split_layers(num_layers: int, world: int) -> list[range]:
+    sizes = [num_layers // world + (1 if i < num_layers % world else 0) for i in range(world)]
+    starts = [sum(sizes[:i]) for i in range(world)]
+    return [range(start, start + size) for start, size in zip(starts, sizes, strict=True)]
+
+
+class PipelineStage(nn.Module):
+    def __init__(self, model: nn.Module, pp: PipelineParallel):
+        super().__init__()
+        self.pp = pp
+        self.layers = split_layers(len(model.decoder_layers), pp.world)[pp.rank]
+        self.embedding = model.embedding if pp.first else None
+        self.decoder_layers = nn.ModuleList(model.decoder_layers[i] for i in self.layers)
+        self.final_norm = model.final_norm if pp.last else None
+        self.final_proj = model.final_proj if pp.last else None
+        self.register_buffer("cos", model.cos, persistent=False)
+        self.register_buffer("sin", model.sin, persistent=False)
+        self.hidden = model.config.hidden_size
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self.embedding is not None:
+            x = self.embedding(x)
+        for layer in self.decoder_layers:
+            x = layer(x, self.cos, self.sin)
+        if self.final_proj is not None:
+            x = self.final_proj(self.final_norm(x))
+        return x
+
+    def names(self) -> list[str]:
+        out = []
+        if self.embedding is not None:
+            out.append("embedding.weight")
+        for i, layer in zip(self.layers, self.decoder_layers, strict=True):
+            out += [f"decoder_layers.{i}.{name}" for name, _ in layer.named_parameters()]
+        if self.final_proj is not None:
+            out += ["final_norm.weight", "final_proj.weight"]
+        return out
