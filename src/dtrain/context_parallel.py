@@ -45,3 +45,21 @@ class ContextParallel:
 def split_batches(batches, cp: ContextParallel):
     for inputs, targets in batches:
         yield cp.split(inputs), cp.split(targets)
+
+
+class RingGather(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x, cp):
+        ctx.cp = cp
+        seen = [x]
+        for _ in range(cp.world - 1):
+            seen.append(cp.exchange(seen[-1], cp.next, cp.prev))
+        return torch.stack(seen)
+
+    @staticmethod
+    def backward(ctx, grad):
+        cp = ctx.cp
+        total = grad[-1]
+        for step in range(cp.world - 2, -1, -1):
+            total = grad[step] + cp.exchange(total, cp.prev, cp.next)
+        return total, None
