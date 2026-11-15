@@ -1,7 +1,15 @@
 import math
+from collections.abc import Callable
 
 import torch
 import torch.distributed as dist
+import torch.nn as nn
+
+from dtrain.context_parallel import ContextParallel, apply_context_parallel, split_batches
+from dtrain.data import micro_batches
+from dtrain.pipeline_parallel import PipelineParallel, PipelineStage
+from dtrain.tensor_parallel import TensorParallel, apply_tensor_parallel
+from dtrain.zero import Zero
 
 DIMS = ("dp", "pp", "cp", "tp")
 GROUPS = {"dp": ("dp",), "pp": ("pp",), "cp": ("cp",), "tp": ("tp",), "cp_dp": ("dp", "cp")}
@@ -29,3 +37,27 @@ class Grid:
         fixed = [i for i in range(len(DIMS)) if i not in varying]
         size = math.prod(self.layout.size(i) for i in varying)
         return self.layout.permute(*fixed, *varying).reshape(-1, size).tolist()
+
+
+def split_model(model: nn.Module, grid: Grid):
+    tp = TensorParallel(grid.groups["tp"])
+    apply_tensor_parallel(model, tp)
+    cp = ContextParallel(grid.groups["cp"], layout="zigzag")
+    apply_context_parallel(model, cp)
+    return PipelineStage(model, PipelineParallel(grid.groups["pp"])), tp, cp
+
+
+def parallelize(
+    model: nn.Module,
+    grid: Grid,
+    zero_stage: int,
+    make_optimizer: Callable[[list[nn.Parameter]], torch.optim.Optimizer],
+):
+    stage, tp, cp = split_model(model, grid)
+    zero = Zero(stage, zero_stage, make_optimizer, grid.groups["cp_dp"])
+    return stage, zero, tp, cp
+
+
+def grid_batches(tokens: torch.Tensor, seq: int, mbs: int, grid: Grid, cp: ContextParallel):
+    dp, rank = grid.sizes["dp"], grid.coords["dp"]
+    return split_batches(micro_batches(tokens, seq, mbs, rank, dp), cp)
