@@ -36,6 +36,12 @@ def apply_rotary_pos_emb(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) 
     return x * cos + rotated * sin
 
 
+def causal_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+    k = k.repeat_interleave(q.size(1) // k.size(1), dim=1)
+    v = v.repeat_interleave(q.size(1) // v.size(1), dim=1)
+    return F.scaled_dot_product_attention(q, k, v, is_causal=True)
+
+
 def init_linear(weight: torch.Tensor) -> None:
     bound = math.sqrt(1 / weight.size(1))
     nn.init.uniform_(weight, -bound, bound)
@@ -66,6 +72,7 @@ class Attention(nn.Module):
         self.out_proj = nn.Linear(config.hidden_size, config.hidden_size, bias=False)
         for proj in (self.q_proj, self.k_proj, self.v_proj, self.out_proj):
             init_linear(proj.weight)
+        self.attend = causal_attention
 
     def forward(self, x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.Tensor:
         batch, seq, _ = x.shape
@@ -74,9 +81,7 @@ class Attention(nn.Module):
         v = self.v_proj(x).view(batch, seq, self.num_kv_heads, self.head_dim).transpose(1, 2)
         q = apply_rotary_pos_emb(q, cos[:seq], sin[:seq])
         k = apply_rotary_pos_emb(k, cos[:seq], sin[:seq])
-        k = k.repeat_interleave(self.num_heads // self.num_kv_heads, dim=1)
-        v = v.repeat_interleave(self.num_heads // self.num_kv_heads, dim=1)
-        out = F.scaled_dot_product_attention(q, k, v, is_causal=True)
+        out = self.attend(q, k, v)
         return self.out_proj(out.transpose(1, 2).reshape(batch, seq, -1))
 
 
