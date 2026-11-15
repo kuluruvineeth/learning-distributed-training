@@ -48,6 +48,7 @@ def main():
         for name in a:
             print(f"{name:<28}{a[name] / 1e6:>9.2f} MB{b[name] / 1e6:>17.2f} MB")
         print(f"{'total':<28}{sum(a.values()) / 1e6:>9.2f} MB{sum(b.values()) / 1e6:>17.2f} MB")
+    dist.barrier()
     dist.destroy_process_group()
 
 

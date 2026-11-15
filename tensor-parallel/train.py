@@ -50,6 +50,7 @@ def main():
     if rank == 0:
         calls = ", ".join(f"{n} {c // args.steps}" for n, c in tp.calls.items())
         print(f"collectives per step: {calls}")
+    dist.barrier()
     dist.destroy_process_group()
 
 
