@@ -26,6 +26,17 @@ class TensorParallel:
         return out
 
 
+class Copy(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x, tp):
+        ctx.tp = tp
+        return x
+
+    @staticmethod
+    def backward(ctx, grad):
+        return ctx.tp.all_reduce(grad.clone()), None
+
+
 class Reduce(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x, tp):
