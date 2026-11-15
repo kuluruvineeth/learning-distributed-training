@@ -119,6 +119,7 @@ def main():
         single_device(args, tokens, log)
     else:
         four_d(args, tokens, log)
+    dist.barrier()
     dist.destroy_process_group()
 
 
