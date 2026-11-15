@@ -2,6 +2,7 @@ import math
 
 import torch
 import torch.distributed as dist
+import torch.nn as nn
 from torch.utils.checkpoint import checkpoint
 
 
@@ -100,3 +101,11 @@ def ring_attention(
         lse = torch.logsumexp(torch.stack([b[1] for b in blocks]), dim=0)
         out.append(sum(torch.exp(b[1] - lse) * b[0] for b in blocks))
     return torch.cat(out, dim=-2)
+
+
+def apply_context_parallel(model: nn.Module, cp: ContextParallel) -> nn.Module:
+    for layer in model.decoder_layers:
+        layer.attention.attend = lambda q, k, v: ring_attention(q, k, v, cp)
+    model.cos = cp.split(model.cos, dim=0)
+    model.sin = cp.split(model.sin, dim=0)
+    return model
