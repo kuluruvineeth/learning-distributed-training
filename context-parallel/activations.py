@@ -50,6 +50,7 @@ def main():
         for name in single:
             cells = "".join(f"{row[name] / 1e6:>8.2f} MB" for row in rows)
             print(f"{name:<28}{single[name] / 1e6:>8.2f} MB{'':>15}{cells}")
+    dist.barrier()
     dist.destroy_process_group()
 
 

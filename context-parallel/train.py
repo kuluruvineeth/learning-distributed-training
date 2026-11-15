@@ -51,6 +51,7 @@ def main():
     dist.all_gather_object(counts, scores)
     if rank == 0:
         print(f"query-key scores computed per rank, last step: {counts}")
+    dist.barrier()
     dist.destroy_process_group()
 
 
