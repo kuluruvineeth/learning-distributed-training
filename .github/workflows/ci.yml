@@ -55,3 +55,9 @@ jobs:
           OMP_NUM_THREADS: "1"
           GLOO_SOCKET_IFNAME: lo
         run: uv run torchrun --nproc-per-node=2 --master-port=29500 pipeline-parallel/train.py --schedule 1f1b --steps 25
+      - name: Run four-rank context-parallel training
+        timeout-minutes: 3
+        env:
+          OMP_NUM_THREADS: "1"
+          GLOO_SOCKET_IFNAME: lo
+        run: uv run torchrun --nproc-per-node=4 --master-port=29500 context-parallel/train.py --layout zigzag --steps 25
