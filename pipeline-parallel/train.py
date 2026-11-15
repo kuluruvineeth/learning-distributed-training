@@ -66,6 +66,7 @@ def main():
             print(f"  stage {rank}: {' '.join(log)}")
         print(f"  bubble, with backward = 2 × forward: {stats['bubble']:.0%}")
         print(f"  micro-batches held at once, per stage: {stats['in_flight']}")
+    dist.barrier()
     dist.destroy_process_group()
 
 
