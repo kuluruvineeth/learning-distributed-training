@@ -114,3 +114,72 @@ def afab(stage: PipelineStage, batches: Iterator, grad_acc: int, shape: tuple) -
         pp.log.append(f"B{i}")
     pp.flush()
     return total
+
+
+def one_f_one_b(stage: PipelineStage, batches: Iterator, grad_acc: int, shape: tuple) -> float:
+    pp, saved, total = stage.pp, [], 0.0
+    warmup = min(pp.world - pp.rank - 1, grad_acc)
+    forwards = backwards = 0
+
+    def forward():
+        nonlocal forwards, total
+        x, out, loss = _forward(stage, batches, grad_acc, shape)
+        pp.log.append(f"F{forwards}")
+        forwards += 1
+        saved.append((x, out, loss))
+        total += loss.item() if loss is not None else 0.0
+
+    def backward():
+        nonlocal backwards
+        _backward(stage, *saved.pop(0), shape)
+        pp.log.append(f"B{backwards}")
+        backwards += 1
+
+    for _ in range(warmup):
+        forward()
+    for _ in range(grad_acc - warmup):
+        forward()
+        backward()
+    for _ in range(warmup):
+        backward()
+    pp.flush()
+    return total
+
+
+def schedule_stats(logs: list[list[str]], forward: float = 1.0, backward: float = 2.0) -> dict:
+    world = len(logs)
+    done = {}
+    clock = [0.0] * world
+    busy = [0.0] * world
+    pending = [list(log) for log in logs]
+    while any(pending):
+        progressed = False
+        for r in range(world):
+            if not pending[r]:
+                continue
+            op = pending[r][0]
+            kind, i = op[0], int(op[1:])
+            need = (r - 1, f"F{i}") if kind == "F" else (r + 1, f"B{i}")
+            if kind == "F" and r == 0 or kind == "B" and r == world - 1:
+                ready = 0.0
+            elif need in done:
+                ready = done[need]
+            else:
+                continue
+            cost = forward if kind == "F" else backward
+            clock[r] = max(clock[r], ready) + cost
+            busy[r] += cost
+            done[(r, op)] = clock[r]
+            pending[r].pop(0)
+            progressed = True
+        if not progressed:
+            raise ValueError("schedule deadlocks")
+    span = max(clock)
+    in_flight = []
+    for log in logs:
+        live = peak = 0
+        for op in log:
+            live += 1 if op[0] == "F" else -1
+            peak = max(peak, live)
+        in_flight.append(peak)
+    return {"bubble": 1 - sum(busy) / (world * span), "in_flight": in_flight}
