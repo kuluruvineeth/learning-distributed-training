@@ -88,3 +88,18 @@ class RowParallelLinear(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return Reduce.apply(F.linear(x, self.weight), self.tp)
+
+
+class VocabParallelEmbedding(nn.Module):
+    def __init__(self, embedding: nn.Embedding, tp: TensorParallel):
+        super().__init__()
+        self.weight = shard(embedding.weight, 0, tp)
+        self.rows = self.weight.size(0)
+        self.start = tp.rank * self.rows
+        self.tp = tp
+
+    def forward(self, ids: torch.Tensor) -> torch.Tensor:
+        outside = (ids < self.start) | (ids >= self.start + self.rows)
+        local = (ids - self.start).masked_fill(outside, 0)
+        out = F.embedding(local, self.weight).masked_fill(outside.unsqueeze(-1), 0.0)
+        return Reduce.apply(out, self.tp)
