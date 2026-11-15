@@ -26,6 +26,16 @@ class TensorParallel:
         return out
 
 
+class Reduce(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x, tp):
+        return tp.all_reduce(x.clone())
+
+    @staticmethod
+    def backward(ctx, grad):
+        return grad, None
+
+
 class Gather(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x, tp):
@@ -57,3 +67,13 @@ class ColumnParallelLinear(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         y = F.linear(x, self.weight)
         return Gather.apply(y, self.tp) if self.gather_output else y
+
+
+class RowParallelLinear(nn.Module):
+    def __init__(self, linear: nn.Linear, tp: TensorParallel):
+        super().__init__()
+        self.weight = shard(linear.weight, 1, tp)
+        self.tp = tp
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return Reduce.apply(F.linear(x, self.weight), self.tp)
