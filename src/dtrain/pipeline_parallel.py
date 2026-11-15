@@ -1,3 +1,5 @@
+from collections.abc import Iterator
+
 import torch
 import torch.distributed as dist
 import torch.nn as nn
@@ -98,3 +100,17 @@ def _backward(stage, x, out, loss, shape):
         torch.autograd.backward(out, pp.recv(shape, pp.next))
     if not pp.first:
         pp.send(x.grad, pp.prev)
+
+
+def afab(stage: PipelineStage, batches: Iterator, grad_acc: int, shape: tuple) -> float:
+    pp, saved, total = stage.pp, [], 0.0
+    for i in range(grad_acc):
+        x, out, loss = _forward(stage, batches, grad_acc, shape)
+        pp.log.append(f"F{i}")
+        saved.append((x, out, loss))
+        total += loss.item() if loss is not None else 0.0
+    for i in range(grad_acc):
+        _backward(stage, *saved.pop(0), shape)
+        pp.log.append(f"B{i}")
+    pp.flush()
+    return total
