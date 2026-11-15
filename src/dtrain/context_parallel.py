@@ -1,5 +1,8 @@
+import math
+
 import torch
 import torch.distributed as dist
+from torch.utils.checkpoint import checkpoint
 
 
 class ContextParallel:
@@ -63,3 +66,37 @@ class RingGather(torch.autograd.Function):
         for step in range(cp.world - 2, -1, -1):
             total = grad[step] + cp.exchange(total, cp.prev, cp.next)
         return total, None
+
+
+def attention_block(q, k, v, causal):
+    k = k.repeat_interleave(q.size(1) // k.size(1), dim=1)
+    v = v.repeat_interleave(q.size(1) // v.size(1), dim=1)
+    scores = q @ k.transpose(-2, -1) / math.sqrt(q.size(-1))
+    if causal:
+        future = torch.ones(q.size(-2), k.size(-2), dtype=torch.bool).triu(1)
+        scores = scores.masked_fill(future, float("-inf"))
+    lse = torch.logsumexp(scores, dim=-1, keepdim=True)
+    return torch.exp(scores - lse) @ v, lse
+
+
+def ring_attention(
+    q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, cp: ContextParallel
+) -> torch.Tensor:
+    mine = cp.chunks(cp.rank)
+    qs = q.chunk(len(mine), dim=-2)
+    parts = [[] for _ in mine]
+    ks, vs = RingGather.apply(k, cp), RingGather.apply(v, cp)
+    for step in range(cp.world):
+        source = (cp.rank - step) % cp.world
+        kbs, vbs = ks[step].chunk(len(mine), dim=-2), vs[step].chunk(len(mine), dim=-2)
+        for i, (a, qa) in enumerate(zip(mine, qs, strict=True)):
+            for b, kb, vb in zip(cp.chunks(source), kbs, vbs, strict=True):
+                if b <= a:
+                    block = checkpoint(attention_block, qa, kb, vb, b == a, use_reentrant=False)
+                    parts[i].append(block)
+                    cp.scores += qa.size(-2) * kb.size(-2)
+    out = []
+    for blocks in parts:
+        lse = torch.logsumexp(torch.stack([b[1] for b in blocks]), dim=0)
+        out.append(sum(torch.exp(b[1] - lse) * b[0] for b in blocks))
+    return torch.cat(out, dim=-2)
