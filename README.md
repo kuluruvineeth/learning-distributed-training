@@ -13,6 +13,7 @@ I'm learning how models train across GPUs. This repo is where I work through the
 - [Parallelism degrees](parallelism-degrees/README.md): what dp, tp and pp mean, how they multiply, and how Llama 3 chose its layout.
 - [Context parallelism](context-parallel/README.md): split one long sequence across four ranks with ring attention, and balance the work with a zigzag layout.
 - [4D parallelism](4d/README.md): put data, tensor, pipeline and context parallelism on one grid of 16 processes and match one device.
+- [End to end](end-to-end/README.md): load SmolLM2-135M into the same code, train it on one process and on 12, and compare them step by step.
 
 ## Run the code
 
@@ -21,7 +22,7 @@ Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then:
 ```bash
 git clone https://github.com/kuluruvineeth/learning-distributed-training.git
 cd learning-distributed-training
-git switch 4d-parallelism
+git switch end-to-end
 uv sync --locked --python 3.12
 uv run pytest -q
 uv run torchrun --nproc-per-node=4 --master-port=29500 collectives/collectives.py
@@ -35,7 +36,7 @@ uv run torchrun --nproc-per-node=4 --master-port=29500 context-parallel/train.py
 uv run torchrun --nproc-per-node=16 --master-port=29500 4d/train.py --dp 2 --pp 2 --cp 2 --tp 2
 ```
 
-These examples run on CPU. The [collectives notes](collectives/README.md) include the macOS setup and the intentional deadlock example. The [ring notes](ring-all-reduce/README.md) cover the communication cost and the floating-point example. The [baseline notes](single-device/README.md) cover the three training runs and the memory measurements. The [data parallelism notes](data-parallel/README.md) compare naive and bucketed gradient sync. The [ZeRO notes](zero/README.md) cover the three stages and what each one saves. The [tensor parallelism notes](tensor-parallel/README.md) cover the column and row splits and the cost at scale. The [pipeline parallelism notes](pipeline-parallel/README.md) cover the bubble, the two schedules and the memory per stage. The [parallelism degrees notes](parallelism-degrees/README.md) work through the numbers for a 64-GPU layout. The [context parallelism notes](context-parallel/README.md) cover ring attention, the zigzag layout and the activations it saves. The [4D notes](4d/README.md) cover the grid, its groups and Llama 3's layouts. The [model notes](why-distributed/README.md) cover the parameter, memory, and compute calculations.
+These examples run on CPU. The [collectives notes](collectives/README.md) include the macOS setup and the intentional deadlock example. The [ring notes](ring-all-reduce/README.md) cover the communication cost and the floating-point example. The [baseline notes](single-device/README.md) cover the three training runs and the memory measurements. The [data parallelism notes](data-parallel/README.md) compare naive and bucketed gradient sync. The [ZeRO notes](zero/README.md) cover the three stages and what each one saves. The [tensor parallelism notes](tensor-parallel/README.md) cover the column and row splits and the cost at scale. The [pipeline parallelism notes](pipeline-parallel/README.md) cover the bubble, the two schedules and the memory per stage. The [parallelism degrees notes](parallelism-degrees/README.md) work through the numbers for a 64-GPU layout. The [context parallelism notes](context-parallel/README.md) cover ring attention, the zigzag layout and the activations it saves. The [4D notes](4d/README.md) cover the grid, its groups and Llama 3's layouts. The [end-to-end notes](end-to-end/README.md) cover the SmolLM2 run on one process and on 12. The [model notes](why-distributed/README.md) cover the parameter, memory, and compute calculations.
 
 ## Diagrams
 
@@ -52,8 +53,9 @@ Download a board and open it in [Excalidraw](https://excalidraw.com):
 - [Parallelism degrees](https://github.com/kuluruvineeth/learning-distributed-training/releases/download/parallelism-degrees/parallelism-degrees.excalidraw)
 - [Context parallelism](https://github.com/kuluruvineeth/learning-distributed-training/releases/download/context-parallelism/context-parallelism.excalidraw)
 - [4D parallelism](https://github.com/kuluruvineeth/learning-distributed-training/releases/download/4d-parallelism/4d-parallelism.excalidraw)
+- [End to end](https://github.com/kuluruvineeth/learning-distributed-training/releases/download/end-to-end/end-to-end.excalidraw)
 
-The commits follow the build. `main` contains the work I've shared so far. Topic branches and tags keep the matching snapshots: [`why-distributed-training`](https://github.com/kuluruvineeth/learning-distributed-training/tree/why-distributed-training), [`collectives`](https://github.com/kuluruvineeth/learning-distributed-training/tree/collectives), [`ring-all-reduce`](https://github.com/kuluruvineeth/learning-distributed-training/tree/ring-all-reduce), [`single-device-baseline`](https://github.com/kuluruvineeth/learning-distributed-training/tree/single-device-baseline), [`data-parallelism`](https://github.com/kuluruvineeth/learning-distributed-training/tree/data-parallelism), [`zero`](https://github.com/kuluruvineeth/learning-distributed-training/tree/zero), [`tensor-parallelism`](https://github.com/kuluruvineeth/learning-distributed-training/tree/tensor-parallelism), [`pipeline-parallelism`](https://github.com/kuluruvineeth/learning-distributed-training/tree/pipeline-parallelism), [`parallelism-degrees`](https://github.com/kuluruvineeth/learning-distributed-training/tree/parallelism-degrees), [`context-parallelism`](https://github.com/kuluruvineeth/learning-distributed-training/tree/context-parallelism) and [`4d-parallelism`](https://github.com/kuluruvineeth/learning-distributed-training/tree/4d-parallelism).
+The commits follow the build. `main` contains the work I've shared so far. Topic branches and tags keep the matching snapshots: [`why-distributed-training`](https://github.com/kuluruvineeth/learning-distributed-training/tree/why-distributed-training), [`collectives`](https://github.com/kuluruvineeth/learning-distributed-training/tree/collectives), [`ring-all-reduce`](https://github.com/kuluruvineeth/learning-distributed-training/tree/ring-all-reduce), [`single-device-baseline`](https://github.com/kuluruvineeth/learning-distributed-training/tree/single-device-baseline), [`data-parallelism`](https://github.com/kuluruvineeth/learning-distributed-training/tree/data-parallelism), [`zero`](https://github.com/kuluruvineeth/learning-distributed-training/tree/zero), [`tensor-parallelism`](https://github.com/kuluruvineeth/learning-distributed-training/tree/tensor-parallelism), [`pipeline-parallelism`](https://github.com/kuluruvineeth/learning-distributed-training/tree/pipeline-parallelism), [`parallelism-degrees`](https://github.com/kuluruvineeth/learning-distributed-training/tree/parallelism-degrees), [`context-parallelism`](https://github.com/kuluruvineeth/learning-distributed-training/tree/context-parallelism), [`4d-parallelism`](https://github.com/kuluruvineeth/learning-distributed-training/tree/4d-parallelism) and [`end-to-end`](https://github.com/kuluruvineeth/learning-distributed-training/tree/end-to-end).
 
 ## License
 
