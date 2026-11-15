@@ -103,3 +103,38 @@ class VocabParallelEmbedding(nn.Module):
         local = (ids - self.start).masked_fill(outside, 0)
         out = F.embedding(local, self.weight).masked_fill(outside.unsqueeze(-1), 0.0)
         return Reduce.apply(out, self.tp)
+
+
+def apply_tensor_parallel(model: nn.Module, tp: TensorParallel) -> nn.Module:
+    def copy_output(module, args, out):
+        return Copy.apply(out, tp)
+
+    for layer in model.decoder_layers:
+        attention, mlp = layer.attention, layer.mlp
+        if attention.num_heads % tp.world or attention.num_kv_heads % tp.world:
+            raise ValueError("attention and key/value heads must split evenly across ranks")
+        attention.q_proj = ColumnParallelLinear(attention.q_proj, tp)
+        attention.k_proj = ColumnParallelLinear(attention.k_proj, tp)
+        attention.v_proj = ColumnParallelLinear(attention.v_proj, tp)
+        attention.out_proj = RowParallelLinear(attention.out_proj, tp)
+        attention.num_heads //= tp.world
+        attention.num_kv_heads //= tp.world
+        mlp.up_proj = ColumnParallelLinear(mlp.up_proj, tp)
+        mlp.gate_proj = ColumnParallelLinear(mlp.gate_proj, tp)
+        mlp.down_proj = RowParallelLinear(mlp.down_proj, tp)
+        layer.input_layernorm.register_forward_hook(copy_output)
+        layer.post_attention_layernorm.register_forward_hook(copy_output)
+    model.embedding = VocabParallelEmbedding(model.embedding, tp)
+    model.final_norm.register_forward_hook(copy_output)
+    model.final_proj = ColumnParallelLinear(model.final_proj, tp, gather_output=True)
+    return model
+
+
+@torch.no_grad()
+def full(param: nn.Parameter, tensor: torch.Tensor, tp: TensorParallel) -> torch.Tensor:
+    dim = getattr(param, "shard_dim", None)
+    if dim is None:
+        return tensor.clone()
+    parts = [torch.empty_like(tensor) for _ in range(tp.world)]
+    dist.all_gather(parts, tensor.contiguous(), group=tp.group)
+    return torch.cat(parts, dim=dim)
